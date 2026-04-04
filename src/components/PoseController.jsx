@@ -26,14 +26,22 @@ export function usePoseController({ videoRef, onPoseResult, enabled }) {
     async function init() {
       try {
         const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-        const landmarker = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: MODEL_URL,
-            delegate: 'GPU',
-          },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-        });
+        const options = { runningMode: 'VIDEO', numPoses: 1 };
+
+        let landmarker;
+        try {
+          landmarker = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
+            ...options,
+          });
+        } catch (gpuErr) {
+          // GPU delegate unavailable — fall back to CPU
+          console.warn('GPU delegate failed, falling back to CPU:', gpuErr);
+          landmarker = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
+            ...options,
+          });
+        }
 
         if (!cancelled) {
           poseLandmarkerRef.current = landmarker;
