@@ -46,6 +46,7 @@ export default function App() {
 
   const videoRef = useRef(null);
   const cameraStartedRef = useRef(false);
+  const streamRef = useRef(null);
 
   // ---- Webcam access ----
   async function startCamera() {
@@ -55,6 +56,7 @@ export default function App() {
         video: { width: 640, height: 480, facingMode: 'user' },
         audio: false,
       });
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         cameraStartedRef.current = true;
@@ -63,6 +65,22 @@ export default function App() {
       setCameraError(err.message || 'Camera access denied');
     }
   }
+
+  // Re-attach the stream whenever the active screen (and thus the <video> element) changes.
+  useEffect(() => {
+    // Stop tracks and reset when returning to start screen.
+    if (screen === 'start') {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        cameraStartedRef.current = false;
+      }
+      return;
+    }
+    if (streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [screen]);
 
   // ---- Pose detection callback ----
   const handlePoseResult = useCallback(
