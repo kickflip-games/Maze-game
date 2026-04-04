@@ -68,14 +68,17 @@ export default function App() {
 
   // Re-attach the stream whenever the active screen (and thus the <video> element) changes.
   useEffect(() => {
+    // Stop tracks and reset when returning to start screen.
+    if (screen === 'start') {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        cameraStartedRef.current = false;
+      }
+      return;
+    }
     if (streamRef.current && videoRef.current) {
       videoRef.current.srcObject = streamRef.current;
-    }
-    // Stop tracks and reset when returning to start screen.
-    if (screen === 'start' && streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      cameraStartedRef.current = false;
     }
   }, [screen]);
 
