@@ -1,30 +1,24 @@
 /**
  * Pose interpreter: converts MediaPipe Pose landmarks into directional controls.
  *
- * Landmark indices used:
- *   11 = left shoulder, 12 = right shoulder
- *   23 = left hip,      24 = right hip
- *
- * Body center = average of the four torso landmarks.
- * We compare the current body center to a calibrated baseline to determine
- * which direction the player is leaning.
+ * This version tracks the nose landmark (index 0) and compares it to a calibrated
+ * centre point. Movement is triggered when the nose drifts beyond a fixed radius.
  *
  * Coordinates are normalized 0–1, where (0,0) is top-left of the video frame.
  * We flip the X axis to match mirrored camera display (selfie mode).
  */
 
-// Thresholds for triggering movement (in normalized units 0–1)
-const HORIZONTAL_THRESHOLD = 0.04;
-const VERTICAL_THRESHOLD = 0.035;
+// Radius threshold (normalized) around the neutral point.
+export const DIRECTION_RADIUS = 0.085;
 
 // Smoothing: rolling average over this many frames
 const HISTORY_SIZE = 6;
 
-let positionHistory = [];
+let noseHistory = [];
 
 /** Reset smoothing history (call when starting a new calibration or game). */
 export function resetPoseHistory() {
-  positionHistory = [];
+  noseHistory = [];
 }
 
 /**
@@ -35,75 +29,63 @@ export function resetPoseHistory() {
  * @param {boolean} [flipX=true] - Flip X axis for mirrored (selfie) camera display
  * @returns {{
  *   direction: 'up'|'down'|'left'|'right'|null,
- *   bodyCenter: { x: number, y: number } | null,
+ *   nose: { x: number, y: number } | null,
  *   visible: boolean,
  *   dx: number,
- *   dy: number
+ *   dy: number,
+ *   distance: number
  * }}
  */
-export function interpretPose(landmarks, calibration, flipX = true) {
-  if (!landmarks || landmarks.length < 25) {
-    return { direction: null, bodyCenter: null, visible: false, dx: 0, dy: 0 };
+export function interpretPose(
+  landmarks,
+  calibration,
+  flipX = true,
+  directionRadius = DIRECTION_RADIUS
+) {
+  if (!landmarks || landmarks.length === 0) {
+    return { direction: null, nose: null, visible: false, dx: 0, dy: 0, distance: 0 };
   }
 
-  const leftShoulder = landmarks[11];
-  const rightShoulder = landmarks[12];
-  const leftHip = landmarks[23];
-  const rightHip = landmarks[24];
-
-  // Check that all four torso landmarks are sufficiently visible
-  const allVisible = [leftShoulder, rightShoulder, leftHip, rightHip].every(
-    (lm) => lm && (lm.visibility == null || lm.visibility > 0.3)
-  );
-
-  if (!allVisible) {
-    return { direction: null, bodyCenter: null, visible: false, dx: 0, dy: 0 };
+  const nose = landmarks[0];
+  if (!nose || (nose.visibility != null && nose.visibility < 0.3)) {
+    return { direction: null, nose: null, visible: false, dx: 0, dy: 0, distance: 0 };
   }
 
-  // Compute raw body center from torso landmarks
-  let rawX =
-    (leftShoulder.x + rightShoulder.x + leftHip.x + rightHip.x) / 4;
-  let rawY =
-    (leftShoulder.y + rightShoulder.y + leftHip.y + rightHip.y) / 4;
-
-  // Flip X to match mirrored camera display
+  let rawX = nose.x;
+  let rawY = nose.y;
   if (flipX) rawX = 1 - rawX;
 
-  // Apply rolling average for smoothing
-  positionHistory.push({ x: rawX, y: rawY });
-  if (positionHistory.length > HISTORY_SIZE) positionHistory.shift();
+  noseHistory.push({ x: rawX, y: rawY });
+  if (noseHistory.length > HISTORY_SIZE) noseHistory.shift();
 
   const smoothX =
-    positionHistory.reduce((s, p) => s + p.x, 0) / positionHistory.length;
+    noseHistory.reduce((sum, point) => sum + point.x, 0) / noseHistory.length;
   const smoothY =
-    positionHistory.reduce((s, p) => s + p.y, 0) / positionHistory.length;
+    noseHistory.reduce((sum, point) => sum + point.y, 0) / noseHistory.length;
 
-  const bodyCenter = { x: smoothX, y: smoothY };
-
-  // Use provided calibration or fall back to the frame centre (0.5, 0.5),
-  // which effectively divides the camera space into directional zones without
-  // requiring the user to calibrate manually.
   const neutral = calibration ?? { x: 0.5, y: 0.5 };
 
-  // Deviation from neutral position
   const dx = smoothX - neutral.x;
   const dy = smoothY - neutral.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
 
-  // Determine direction: pick the axis with the larger deviation,
-  // only if it exceeds the threshold for that axis.
   let direction = null;
-  const absX = Math.abs(dx);
-  const absY = Math.abs(dy);
-
-  if (absX > HORIZONTAL_THRESHOLD || absY > VERTICAL_THRESHOLD) {
-    if (absX >= absY) {
+  if (distance > directionRadius) {
+    if (Math.abs(dx) >= Math.abs(dy)) {
       direction = dx > 0 ? 'right' : 'left';
     } else {
       direction = dy > 0 ? 'down' : 'up';
     }
   }
 
-  return { direction, bodyCenter, visible: true, dx, dy };
+  return {
+    direction,
+    nose: { x: smoothX, y: smoothY },
+    visible: true,
+    dx,
+    dy,
+    distance,
+  };
 }
 
 /**

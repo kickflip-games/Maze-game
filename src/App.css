@@ -280,23 +280,23 @@ html, body {
   display: flex;
   gap: 16px;
   flex: 1;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .panel-left {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 320px;
+  flex: 0 0 360px;
+  width: 360px;
 }
 
 .panel-right {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 300px;
 }
 
 .panel-title {
@@ -316,6 +316,37 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.slider-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.slider-control label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.slider-control span {
+  font-size: 0.9rem;
+  color: var(--accent-2);
+}
+
+.slider-control input[type='range'] {
+  width: 100%;
+}
+
+.maze-container {
+  width: 100%;
 }
 
 .calibrate-instructions {

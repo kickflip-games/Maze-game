@@ -1,58 +1,37 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { usePoseController } from './components/PoseController';
 import WebcamPoseOverlay from './components/WebcamPoseOverlay';
 import MazeGame from './components/MazeGame';
-import HUD from './components/HUD';
-import {
-  interpretPose,
-  getBodyCenter,
-  resetPoseHistory,
-} from './utils/poseInterpreter';
+import { interpretPose, resetPoseHistory } from './utils/poseInterpreter';
 import { generateMaze } from './utils/mazeGenerator';
 import './App.css';
 
-// Maze dimensions by difficulty
-const DIFFICULTY = {
-  easy: { cols: 10, rows: 10, label: 'Easy (10×10)' },
-  medium: { cols: 15, rows: 15, label: 'Medium (15×15)' },
-  hard: { cols: 20, rows: 20, label: 'Hard (20×20)' },
-};
+const DEFAULT_MAZE_SIZE = { cols: 15, rows: 15 };
 
 export default function App() {
-  // App screens: 'start' | 'permission' | 'game' | 'win'
-  const [screen, setScreen] = useState('start');
-  const [difficulty, setDifficulty] = useState('medium');
   const [cameraError, setCameraError] = useState(null);
-
-  // Pose state
   const [landmarks, setLandmarks] = useState(null);
-  // Default calibration to frame centre — no manual calibration required.
-  const [calibration, setCalibration] = useState({ x: 0.5, y: 0.5 });
-  const [calibrated, setCalibrated] = useState(true);
-  // True when the user has set a custom calibration point (vs auto frame-centre).
-  const [customCalibration, setCustomCalibration] = useState(false);
-
-  // Interpreted pose direction
+const calibration = useMemo(() => ({ x: 0.5, y: 0.5 }), []);
   const [poseResult, setPoseResult] = useState({
     direction: null,
-    bodyCenter: null,
+    nose: null,
     visible: false,
     dx: 0,
     dy: 0,
+    distance: 0,
   });
-
-  // Game state
+  const [directionRadius, setDirectionRadius] = useState(0.085);
   const [maze, setMaze] = useState(null);
   const [playerPos, setPlayerPos] = useState({ row: 0, col: 0 });
   const [elapsedTime, setElapsedTime] = useState(0);
-  const gameStartTimeRef = useRef(null);
+  const [hasWon, setHasWon] = useState(false);
 
+  const gameStartTimeRef = useRef(null);
   const videoRef = useRef(null);
   const cameraStartedRef = useRef(false);
   const streamRef = useRef(null);
 
-  // ---- Webcam access ----
-  async function startCamera() {
+  const startCamera = useCallback(async () => {
     if (cameraStartedRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -67,273 +46,130 @@ export default function App() {
     } catch (err) {
       setCameraError(err.message || 'Camera access denied');
     }
-  }
+  }, []);
 
-  // Re-attach the stream whenever the active screen (and thus the <video> element) changes.
-  useEffect(() => {
-    // Stop tracks and reset when returning to start screen.
-    if (screen === 'start') {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-        cameraStartedRef.current = false;
-      }
-      return;
-    }
-    if (streamRef.current && videoRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-    }
-  }, [screen]);
-
-  // ---- Pose detection callback ----
   const handlePoseResult = useCallback(
     (rawLandmarks) => {
       setLandmarks(rawLandmarks);
-      const result = interpretPose(rawLandmarks, calibrated ? calibration : null);
+      const result = interpretPose(
+        rawLandmarks,
+        calibration,
+        true,
+        directionRadius
+      );
       setPoseResult(result);
     },
-    [calibration, calibrated]
+    [calibration, directionRadius]
   );
 
-  const poseEnabled = screen === 'game' || screen === 'win';
-
-  const { poseStatus } = usePoseController({
-    videoRef,
-    onPoseResult: handlePoseResult,
-    enabled: poseEnabled,
-  });
-
-  // ---- Calibration (optional — defaults to frame centre) ----
-  function handleCalibrate() {
-    const center = getBodyCenter(landmarks);
-    if (center) {
-      resetPoseHistory();
-      setCalibration(center);
-      setCalibrated(true);
-      setCustomCalibration(true);
-    }
-  }
-
-  // ---- Reset calibration to default frame centre ----
-  function resetCalibration() {
-    resetPoseHistory();
-    setCalibration({ x: 0.5, y: 0.5 });
-    setCalibrated(true);
-    setCustomCalibration(false);
-  }
-
-  // ---- Start game ----
-  function startGame() {
-    const { cols, rows } = DIFFICULTY[difficulty];
+  const startGame = useCallback(() => {
+    const { cols, rows } = DEFAULT_MAZE_SIZE;
     const newMaze = generateMaze(cols, rows);
     resetPoseHistory();
     setMaze(newMaze);
     setPlayerPos({ row: 0, col: 0 });
     gameStartTimeRef.current = Date.now();
     setElapsedTime(0);
-    setScreen('game');
-  }
+    setHasWon(false);
+  }, []);
 
-  // ---- Timer ----
+  const handlePlayerMove = useCallback(
+    (newPos) => {
+      setPlayerPos(newPos);
+      if (
+        maze &&
+        newPos.row === maze.end.row &&
+        newPos.col === maze.end.col
+      ) {
+        setElapsedTime(
+          Math.floor((Date.now() - gameStartTimeRef.current) / 1000)
+        );
+        setHasWon(true);
+      }
+    },
+    [maze]
+  );
+
   useEffect(() => {
-    if (screen !== 'game') return;
+    startCamera();
+    startGame();
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        cameraStartedRef.current = false;
+      }
+    };
+  }, [startCamera, startGame]);
+
+  useEffect(() => {
+    if (!maze || hasWon) return;
     const interval = setInterval(() => {
-      setElapsedTime(Math.floor((Date.now() - gameStartTimeRef.current) / 1000));
+      if (gameStartTimeRef.current) {
+        setElapsedTime(
+          Math.floor((Date.now() - gameStartTimeRef.current) / 1000)
+        );
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, [screen]);
+  }, [maze, hasWon]);
 
-  // ---- Win detection ----
-  function handlePlayerMove(newPos) {
-    setPlayerPos(newPos);
-    if (
-      maze &&
-      newPos.row === maze.end.row &&
-      newPos.col === maze.end.col
-    ) {
-      setElapsedTime(Math.floor((Date.now() - gameStartTimeRef.current) / 1000));
-      setScreen('win');
-    }
-  }
-
-  // ---- Screen: Start ----
-  if (screen === 'start') {
-    return (
-      <div className="screen start-screen">
-        <div className="start-content">
-          <h1 className="game-title">🌀 Maze Runner</h1>
-          <p className="game-subtitle">
-            Navigate a maze using your body — no keyboard required!
-          </p>
-
-          <div className="instructions-box">
-            <h3>How to Play</h3>
-            <ul>
-              <li>
-                🧍 Stand in front of your webcam so your full upper body is
-                visible
-              </li>
-              <li>⬅️ Lean left to move left, right to move right</li>
-              <li>⬆️ Stand taller to move up, crouch to move down</li>
-              <li>🌫️ The maze is hidden — only a small area around you is visible</li>
-              <li>⭐ Find the star to win!</li>
-            </ul>
-          </div>
-
-          <div className="difficulty-select">
-            <label>Difficulty:</label>
-            <div className="difficulty-buttons">
-              {Object.entries(DIFFICULTY).map(([key, val]) => (
-                <button
-                  key={key}
-                  className={`btn ${difficulty === key ? 'btn-active' : 'btn-outline'}`}
-                  onClick={() => setDifficulty(key)}
-                >
-                  {val.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            className="btn btn-primary btn-large"
-            onClick={() => {
-              setScreen('permission');
-              // Slight delay so video ref is mounted
-              setTimeout(startCamera, 200);
-            }}
-          >
-            Start Game →
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Screen: Permission / Camera Setup ----
-  if (screen === 'permission') {
-    return (
-      <div className="screen permission-screen">
-        <div className="start-content">
-          <h2>📷 Camera Access</h2>
-
-          {cameraError ? (
-            <div className="error-box">
-              <p>⚠️ Camera error: {cameraError}</p>
-              <p>Please allow camera access and refresh the page.</p>
-            </div>
-          ) : (
-            <>
-              <p>
-                Allow camera access when prompted. Your webcam feed will be
-                used locally — nothing is sent to any server.
-              </p>
-              <div className="webcam-preview">
-                {/* Hidden video – just for initialization */}
-                <video
-                  ref={videoRef}
-                  width={320}
-                  height={240}
-                  autoPlay
-                  playsInline
-                  muted
-                  style={{ transform: 'scaleX(-1)', borderRadius: '8px' }}
-                  onCanPlay={() => startGame()}
-                />
-              </div>
-              <p className="hint">Waiting for camera…</p>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Screens: Game / Win (share layout) ----
-  const showWinOverlay = screen === 'win';
+  const poseEnabled = !!maze;
+  usePoseController({
+    videoRef,
+    onPoseResult: handlePoseResult,
+    enabled: poseEnabled,
+  });
 
   return (
     <div className="screen game-screen">
       <header className="game-header">
         <h1 className="game-title-small">🌀 Maze Runner</h1>
-        {screen === 'game' && (
-          <div className="timer">⏱ {formatTime(elapsedTime)}</div>
-        )}
-        {screen === 'win' && (
-          <div className="timer win-time">
-            🏆 {formatTime(elapsedTime)}
-          </div>
-        )}
-        <button
-          className="btn btn-outline btn-small"
-          onClick={() => {
-            setScreen('start');
-            setCalibrated(true);
-            setCalibration({ x: 0.5, y: 0.5 });
-            setCustomCalibration(false);
-            setMaze(null);
-          }}
-        >
-          ↩ Menu
-        </button>
+        <div className="timer">⏱ {formatTime(elapsedTime)}</div>
       </header>
 
-      <HUD
-        poseStatus={poseStatus}
-        customCalibration={customCalibration}
-        direction={screen === 'game' ? poseResult.direction : null}
-        visible={poseResult.visible}
-      />
+      {cameraError && (
+        <div className="error-box">
+          <p>⚠️ Camera error: {cameraError}</p>
+          <p>Please allow camera access and refresh.</p>
+        </div>
+      )}
 
       <div className="game-layout">
-        {/* Left panel: webcam */}
-        <div className="panel-left">
-          <h3 className="panel-title">📷 Camera</h3>
-          <WebcamPoseOverlay
-            videoRef={videoRef}
-            landmarks={landmarks}
-            width={320}
-            height={240}
-            calibration={calibration}
-            poseResult={poseResult}
-          />
-
+          <div className="panel-left">
+            <WebcamPoseOverlay
+              videoRef={videoRef}
+              landmarks={landmarks}
+              width={320}
+              height={240}
+              calibration={calibration}
+              poseResult={poseResult}
+              directionRadius={directionRadius}
+            />
           <div className="controls-panel">
-            <button
-              className={`btn ${poseResult.visible ? 'btn-primary' : 'btn-disabled'} btn-full`}
-              onClick={handleCalibrate}
-              disabled={!poseResult.visible}
-            >
-              🎯 Calibrate to Body
-            </button>
-
-            <button
-              className="btn btn-outline btn-full"
-              onClick={resetCalibration}
-            >
-              ↩ Reset to Centre
-            </button>
-
-            <button
-              className="btn btn-outline btn-full"
-              onClick={startGame}
-            >
+            <button className="btn btn-outline btn-full" onClick={startGame}>
               🔁 New Maze
             </button>
+            <div className="slider-control">
+              <label>
+                Movement deadzone
+                <span>{(directionRadius * 100).toFixed(1)}%</span>
+              </label>
+              <input
+                type="range"
+                min="0.03"
+                max="0.18"
+                step="0.005"
+                value={directionRadius}
+                onChange={(event) =>
+                  setDirectionRadius(parseFloat(event.target.value))
+                }
+              />
+            </div>
           </div>
         </div>
 
-        {/* Right panel: maze */}
         <div className="panel-right">
-          <h3 className="panel-title">
-            🗺️ Maze
-            {maze && (
-              <span className="maze-size">
-                {' '}({maze.cols}×{maze.rows})
-              </span>
-            )}
-          </h3>
-
           {maze && (
             <div style={{ position: 'relative' }}>
               <MazeGame
@@ -341,10 +177,10 @@ export default function App() {
                 playerPos={playerPos}
                 onMove={handlePlayerMove}
                 direction={poseResult.direction}
-                calibrated={calibrated}
+                calibrated={true}
               />
 
-              {showWinOverlay && (
+              {hasWon && (
                 <div className="win-overlay">
                   <div className="win-content">
                     <div className="win-emoji">🏆</div>
@@ -352,10 +188,7 @@ export default function App() {
                     <p>
                       Completed in <strong>{formatTime(elapsedTime)}</strong>
                     </p>
-                    <button
-                      className="btn btn-primary"
-                      onClick={startGame}
-                    >
+                    <button className="btn btn-primary" onClick={startGame}>
                       Play Again
                     </button>
                   </div>

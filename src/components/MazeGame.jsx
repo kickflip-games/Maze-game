@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 
 const CELL_SIZE = 30;
 const WALL_WIDTH = 2;
@@ -34,7 +34,12 @@ export default function MazeGame({
   calibrated,
 }) {
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const [cellSize, setCellSize] = useState(CELL_SIZE);
   const lastMoveRef = useRef(0);
+  const moveIntervalRef = useRef(null);
+  const playerRef = useRef(playerPos);
+  const mazeRef = useRef(maze);
   const MOVE_COOLDOWN = 160; // ms between moves
 
   // Attempt to move the player in the given direction
@@ -64,12 +69,60 @@ export default function MazeGame({
     [onMove]
   );
 
-  // Trigger movement when direction changes
   useEffect(() => {
-    if (calibrated && direction) {
-      tryMove(direction, playerPos, maze);
+    playerRef.current = playerPos;
+  }, [playerPos]);
+
+  useEffect(() => {
+    mazeRef.current = maze;
+  }, [maze]);
+
+  useEffect(() => {
+    if (moveIntervalRef.current) {
+      clearInterval(moveIntervalRef.current);
+      moveIntervalRef.current = null;
     }
-  }, [direction, playerPos, maze, calibrated, tryMove]);
+
+    if (!calibrated || !direction) {
+      return;
+    }
+
+    tryMove(direction, playerRef.current, mazeRef.current);
+
+    moveIntervalRef.current = setInterval(() => {
+      tryMove(direction, playerRef.current, mazeRef.current);
+    }, MOVE_COOLDOWN);
+
+    return () => {
+      if (moveIntervalRef.current) {
+        clearInterval(moveIntervalRef.current);
+        moveIntervalRef.current = null;
+      }
+    };
+  }, [direction, calibrated, tryMove]);
+
+  useEffect(() => {
+    if (!maze || !containerRef.current) return;
+
+    const updateSize = () => {
+      const wrapper = containerRef.current;
+      if (!wrapper) return;
+      const available = wrapper.clientWidth;
+      if (available <= 0) return;
+      const maxCell = Math.max(20, Math.min(60, available / maze.cols));
+      setCellSize(maxCell);
+    };
+
+    updateSize();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver(() => {
+      updateSize();
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [maze?.cols]);
 
   // Draw the maze
   useEffect(() => {
@@ -78,11 +131,13 @@ export default function MazeGame({
 
     const { grid, rows, cols, start, end } = maze;
     const ctx = canvas.getContext('2d');
-    const W = cols * CELL_SIZE;
-    const H = rows * CELL_SIZE;
+    const W = cols * cellSize;
+    const H = rows * cellSize;
 
     canvas.width = W;
     canvas.height = H;
+    canvas.style.width = '100%';
+    canvas.style.height = `${H}px`;
 
     // ---- Background ----
     ctx.fillStyle = COLORS.bg;
@@ -91,13 +146,13 @@ export default function MazeGame({
     // ---- Draw maze cells (paths and walls) ----
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        const x = c * CELL_SIZE;
-        const y = r * CELL_SIZE;
+        const x = c * cellSize;
+        const y = r * cellSize;
         const cell = grid[r][c];
 
         // Cell floor
         ctx.fillStyle = COLORS.path;
-        ctx.fillRect(x + WALL_WIDTH, y + WALL_WIDTH, CELL_SIZE - WALL_WIDTH, CELL_SIZE - WALL_WIDTH);
+        ctx.fillRect(x + WALL_WIDTH, y + WALL_WIDTH, cellSize - WALL_WIDTH, cellSize - WALL_WIDTH);
 
         // Walls
         ctx.strokeStyle = COLORS.wall;
@@ -107,25 +162,25 @@ export default function MazeGame({
         if (cell.walls.top) {
           ctx.beginPath();
           ctx.moveTo(x, y);
-          ctx.lineTo(x + CELL_SIZE, y);
+          ctx.lineTo(x + cellSize, y);
           ctx.stroke();
         }
         if (cell.walls.right) {
           ctx.beginPath();
-          ctx.moveTo(x + CELL_SIZE, y);
-          ctx.lineTo(x + CELL_SIZE, y + CELL_SIZE);
+          ctx.moveTo(x + cellSize, y);
+          ctx.lineTo(x + cellSize, y + cellSize);
           ctx.stroke();
         }
         if (cell.walls.bottom) {
           ctx.beginPath();
-          ctx.moveTo(x, y + CELL_SIZE);
-          ctx.lineTo(x + CELL_SIZE, y + CELL_SIZE);
+          ctx.moveTo(x, y + cellSize);
+          ctx.lineTo(x + cellSize, y + cellSize);
           ctx.stroke();
         }
         if (cell.walls.left) {
           ctx.beginPath();
           ctx.moveTo(x, y);
-          ctx.lineTo(x, y + CELL_SIZE);
+          ctx.lineTo(x, y + cellSize);
           ctx.stroke();
         }
       }
@@ -133,28 +188,28 @@ export default function MazeGame({
 
     // ---- Draw start marker ----
     {
-      const sx = start.col * CELL_SIZE + CELL_SIZE / 2;
-      const sy = start.row * CELL_SIZE + CELL_SIZE / 2;
+      const sx = start.col * cellSize + cellSize / 2;
+      const sy = start.row * cellSize + cellSize / 2;
       ctx.fillStyle = COLORS.start;
       ctx.beginPath();
-      ctx.arc(sx, sy, CELL_SIZE * 0.25, 0, Math.PI * 2);
+      ctx.arc(sx, sy, cellSize * 0.25, 0, Math.PI * 2);
       ctx.fill();
     }
 
     // ---- Draw exit marker ----
     {
-      const ex = end.col * CELL_SIZE + CELL_SIZE / 2;
-      const ey = end.row * CELL_SIZE + CELL_SIZE / 2;
-      const grd = ctx.createRadialGradient(ex, ey, 0, ex, ey, CELL_SIZE * 0.6);
+      const ex = end.col * cellSize + cellSize / 2;
+      const ey = end.row * cellSize + cellSize / 2;
+      const grd = ctx.createRadialGradient(ex, ey, 0, ex, ey, cellSize * 0.6);
       grd.addColorStop(0, COLORS.exit);
       grd.addColorStop(1, 'transparent');
       ctx.fillStyle = grd;
       ctx.beginPath();
-      ctx.arc(ex, ey, CELL_SIZE * 0.6, 0, Math.PI * 2);
+      ctx.arc(ex, ey, cellSize * 0.6, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = COLORS.exit;
-      ctx.font = `${CELL_SIZE * 0.7}px sans-serif`;
+      ctx.font = `${cellSize * 0.7}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('★', ex, ey);
@@ -162,29 +217,29 @@ export default function MazeGame({
 
     // ---- Draw player dot ----
     {
-      const px = playerPos.col * CELL_SIZE + CELL_SIZE / 2;
-      const py = playerPos.row * CELL_SIZE + CELL_SIZE / 2;
+      const px = playerPos.col * cellSize + cellSize / 2;
+      const py = playerPos.row * cellSize + cellSize / 2;
 
       // Glow
-      const grd = ctx.createRadialGradient(px, py, 0, px, py, CELL_SIZE * 0.8);
+      const grd = ctx.createRadialGradient(px, py, 0, px, py, cellSize * 0.8);
       grd.addColorStop(0, COLORS.playerGlow);
       grd.addColorStop(1, 'transparent');
       ctx.fillStyle = grd;
       ctx.beginPath();
-      ctx.arc(px, py, CELL_SIZE * 0.8, 0, Math.PI * 2);
+      ctx.arc(px, py, cellSize * 0.8, 0, Math.PI * 2);
       ctx.fill();
 
       // Dot
       ctx.fillStyle = COLORS.player;
       ctx.beginPath();
-      ctx.arc(px, py, CELL_SIZE * 0.3, 0, Math.PI * 2);
+      ctx.arc(px, py, cellSize * 0.3, 0, Math.PI * 2);
       ctx.fill();
     }
 
     // ---- Fog of war ----
-    const fogX = playerPos.col * CELL_SIZE + CELL_SIZE / 2;
-    const fogY = playerPos.row * CELL_SIZE + CELL_SIZE / 2;
-    const fogPixelRadius = FOG_RADIUS * CELL_SIZE;
+    const fogX = playerPos.col * cellSize + cellSize / 2;
+    const fogY = playerPos.row * cellSize + cellSize / 2;
+    const fogPixelRadius = FOG_RADIUS * cellSize;
 
     // Dark overlay with radial cutout around the player
     ctx.save();
@@ -197,18 +252,18 @@ export default function MazeGame({
     ctx.closePath();
     ctx.fill('evenodd');
     ctx.restore();
-  }, [maze, playerPos]);
+  }, [maze, playerPos, cellSize]);
 
   if (!maze) return null;
 
-  const canvasWidth = maze.cols * CELL_SIZE;
-  const canvasHeight = maze.rows * CELL_SIZE;
+  const canvasHeight = maze.rows * cellSize;
 
   return (
     <div
+      ref={containerRef}
       className="maze-container"
       style={{
-        width: canvasWidth,
+        width: '100%',
         height: canvasHeight,
         position: 'relative',
         borderRadius: '8px',
@@ -216,7 +271,10 @@ export default function MazeGame({
         boxShadow: '0 0 30px rgba(68, 102, 255, 0.4)',
       }}
     >
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+      <canvas
+        ref={canvasRef}
+        style={{ display: 'block', width: '100%', height: '100%' }}
+      />
     </div>
   );
 }

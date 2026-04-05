@@ -1,26 +1,16 @@
 import { useEffect, useRef } from 'react';
+import { DIRECTION_RADIUS } from '../utils/poseInterpreter';
 
 /**
  * MediaPipe Pose skeleton connections (pairs of landmark indices).
- * Covering the main body: face, arms, torso, legs.
+ * Covers the head, spine, and legs while omitting arm/hand joints.
  */
-const POSE_CONNECTIONS = [
-  // Face
+const FACE_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 7],
   [0, 4], [4, 5], [5, 6], [6, 8],
-  // Shoulders
-  [11, 12],
-  // Left arm
-  [11, 13], [13, 15],
-  // Right arm
-  [12, 14], [14, 16],
-  // Torso
-  [11, 23], [12, 24], [23, 24],
-  // Left leg
-  [23, 25], [25, 27], [27, 29], [29, 31],
-  // Right leg
-  [24, 26], [26, 28], [28, 30], [30, 32],
 ];
+
+const FACE_LANDMARKS = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
 /**
  * Shows a webcam feed with a MediaPipe Pose skeleton overlay drawn on a canvas.
@@ -31,7 +21,7 @@ const POSE_CONNECTIONS = [
  *   width       - display width in pixels
  *   height      - display height in pixels
  *   calibration - neutral body centre { x, y } in normalised [0,1] coords
- *   poseResult  - current interpreted pose { direction, bodyCenter, visible }
+ *   poseResult  - current interpreted pose { direction, nose, visible, distance }
  */
 export default function WebcamPoseOverlay({
   videoRef,
@@ -39,7 +29,8 @@ export default function WebcamPoseOverlay({
   width = 320,
   height = 240,
   calibration = { x: 0.5, y: 0.5 },
-  poseResult = { direction: null, bodyCenter: null, visible: false },
+  poseResult = { direction: null, nose: null, visible: false, distance: 0 },
+  directionRadius = DIRECTION_RADIUS,
 }) {
   const canvasRef = useRef(null);
 
@@ -53,7 +44,10 @@ export default function WebcamPoseOverlay({
     // ── Directional guide overlay ─────────────────────────────────────────
     const cx = calibration.x * width;
     const cy = calibration.y * height;
-    const { direction: activeDir, bodyCenter } = poseResult;
+    const { direction: activeDir, nose, distance = 0 } = poseResult;
+    const thresholdRadius = directionRadius * Math.min(width, height);
+    const noseOutside = distance > directionRadius;
+    const distanceRadius = Math.min(distance, 0.55) * Math.min(width, height);
 
     // Faint cross-hair lines dividing the frame into 4 movement zones
     ctx.save();
@@ -119,29 +113,52 @@ export default function WebcamPoseOverlay({
     ctx.fill();
     ctx.restore();
 
-    // Body centre tracker: line + dot
-    if (bodyCenter) {
-      const bx = bodyCenter.x * width;
-      const by = bodyCenter.y * height;
+    // Movement threshold circle
+    ctx.save();
+    ctx.strokeStyle = noseOutside
+      ? 'rgba(0,255,136,0.55)'
+      : 'rgba(255,255,255,0.35)';
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, thresholdRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
 
-      // Line from neutral to current body centre
+    if (distanceRadius > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, distanceRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // Nose tracker: line + dot
+    if (nose) {
+      const nx = nose.x * width;
+      const ny = nose.y * height;
+
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.lineTo(bx, by);
-      ctx.strokeStyle = activeDir
+      ctx.lineTo(nx, ny);
+      ctx.strokeStyle = noseOutside
         ? 'rgba(0,255,136,0.55)'
         : 'rgba(255,255,255,0.3)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
 
-      // Dot at current body centre
       ctx.save();
       ctx.beginPath();
-      ctx.arc(bx, by, 6, 0, Math.PI * 2);
-      ctx.fillStyle = activeDir ? '#00ff88' : '#ffffff';
-      ctx.shadowColor = activeDir ? '#00ff88' : 'rgba(255,255,255,0.8)';
+      ctx.arc(nx, ny, 6, 0, Math.PI * 2);
+      ctx.fillStyle = noseOutside ? '#00ff88' : '#ffffff';
+      ctx.shadowColor = noseOutside
+        ? '#00ff88'
+        : 'rgba(255,255,255,0.8)';
       ctx.shadowBlur = 12;
       ctx.fill();
       ctx.restore();
@@ -162,11 +179,10 @@ export default function WebcamPoseOverlay({
     // Draw skeleton lines
     ctx.strokeStyle = '#00ff88';
     ctx.lineWidth = 2;
-    for (const [a, b] of POSE_CONNECTIONS) {
+    for (const [a, b] of FACE_CONNECTIONS) {
       const lmA = landmarks[a];
       const lmB = landmarks[b];
       if (!lmA || !lmB) continue;
-      // Skip low-visibility landmarks
       if (
         (lmA.visibility != null && lmA.visibility < 0.3) ||
         (lmB.visibility != null && lmB.visibility < 0.3)
@@ -181,16 +197,17 @@ export default function WebcamPoseOverlay({
       ctx.stroke();
     }
 
-    // Draw joint dots
+    // Draw face landmarks
     ctx.fillStyle = '#ffff00';
-    for (const lm of landmarks) {
-      if (!lm) continue;
-      if (lm.visibility != null && lm.visibility < 0.3) continue;
+    landmarks.forEach((lm, index) => {
+      if (!lm) return;
+      if (!FACE_LANDMARKS.has(index)) return;
+      if (lm.visibility != null && lm.visibility < 0.3) return;
       const p = toCanvas(lm);
       ctx.beginPath();
       ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
       ctx.fill();
-    }
+    });
   }, [landmarks, calibration, poseResult, width, height]);
 
   return (
