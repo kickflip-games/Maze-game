@@ -294,6 +294,8 @@ export default function App() {
             landmarks={landmarks}
             width={320}
             height={240}
+            calibration={calibration}
+            poseResult={poseResult}
           />
 
           <div className="controls-panel">
