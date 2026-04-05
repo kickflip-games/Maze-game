@@ -1,9 +1,9 @@
 /**
  * HUD (Heads-Up Display) component.
- * Shows pose detection status, calibration state, current direction, and
+ * Shows pose detection status, calibration mode, current direction, and
  * whether the player is visible to the camera.
  */
-export default function HUD({ poseStatus, calibrated, direction, visible }) {
+export default function HUD({ poseStatus, customCalibration, direction, visible }) {
   const directionArrow = {
     up: '↑',
     down: '↓',
@@ -35,9 +35,9 @@ export default function HUD({ poseStatus, calibrated, direction, visible }) {
       </div>
 
       <div className="hud-item">
-        <span className="hud-label">Calibration</span>
-        <span className={`hud-value ${calibrated ? 'status-ok' : 'status-warn'}`}>
-          {calibrated ? '✓ Calibrated' : '✗ Not Calibrated'}
+        <span className="hud-label">Mode</span>
+        <span className="hud-value status-ok">
+          {customCalibration ? '🎯 Custom' : '⊹ Auto Centre'}
         </span>
       </div>
 

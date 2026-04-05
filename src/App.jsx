@@ -19,15 +19,18 @@ const DIFFICULTY = {
 };
 
 export default function App() {
-  // App screens: 'start' | 'permission' | 'calibrate' | 'game' | 'win'
+  // App screens: 'start' | 'permission' | 'game' | 'win'
   const [screen, setScreen] = useState('start');
   const [difficulty, setDifficulty] = useState('medium');
   const [cameraError, setCameraError] = useState(null);
 
   // Pose state
   const [landmarks, setLandmarks] = useState(null);
-  const [calibration, setCalibration] = useState(null);
-  const [calibrated, setCalibrated] = useState(false);
+  // Default calibration to frame centre — no manual calibration required.
+  const [calibration, setCalibration] = useState({ x: 0.5, y: 0.5 });
+  const [calibrated, setCalibrated] = useState(true);
+  // True when the user has set a custom calibration point (vs auto frame-centre).
+  const [customCalibration, setCustomCalibration] = useState(false);
 
   // Interpreted pose direction
   const [poseResult, setPoseResult] = useState({
@@ -92,8 +95,7 @@ export default function App() {
     [calibration, calibrated]
   );
 
-  const poseEnabled =
-    screen === 'calibrate' || screen === 'game' || screen === 'win';
+  const poseEnabled = screen === 'game' || screen === 'win';
 
   const { poseStatus } = usePoseController({
     videoRef,
@@ -101,14 +103,23 @@ export default function App() {
     enabled: poseEnabled,
   });
 
-  // ---- Calibration ----
+  // ---- Calibration (optional — defaults to frame centre) ----
   function handleCalibrate() {
     const center = getBodyCenter(landmarks);
     if (center) {
       resetPoseHistory();
       setCalibration(center);
       setCalibrated(true);
+      setCustomCalibration(true);
     }
+  }
+
+  // ---- Reset calibration to default frame centre ----
+  function resetCalibration() {
+    resetPoseHistory();
+    setCalibration({ x: 0.5, y: 0.5 });
+    setCalibrated(true);
+    setCustomCalibration(false);
   }
 
   // ---- Start game ----
@@ -227,7 +238,7 @@ export default function App() {
                   playsInline
                   muted
                   style={{ transform: 'scaleX(-1)', borderRadius: '8px' }}
-                  onCanPlay={() => setScreen('calibrate')}
+                  onCanPlay={() => startGame()}
                 />
               </div>
               <p className="hint">Waiting for camera…</p>
@@ -238,8 +249,7 @@ export default function App() {
     );
   }
 
-  // ---- Screens: Calibrate / Game / Win (share layout) ----
-  const showCalibrateOverlay = screen === 'calibrate';
+  // ---- Screens: Game / Win (share layout) ----
   const showWinOverlay = screen === 'win';
 
   return (
@@ -258,8 +268,9 @@ export default function App() {
           className="btn btn-outline btn-small"
           onClick={() => {
             setScreen('start');
-            setCalibrated(false);
-            setCalibration(null);
+            setCalibrated(true);
+            setCalibration({ x: 0.5, y: 0.5 });
+            setCustomCalibration(false);
             setMaze(null);
           }}
         >
@@ -269,7 +280,7 @@ export default function App() {
 
       <HUD
         poseStatus={poseStatus}
-        calibrated={calibrated}
+        customCalibration={customCalibration}
         direction={screen === 'game' ? poseResult.direction : null}
         visible={poseResult.visible}
       />
@@ -291,39 +302,23 @@ export default function App() {
               onClick={handleCalibrate}
               disabled={!poseResult.visible}
             >
-              {calibrated ? '🔄 Recalibrate' : '🎯 Calibrate'}
+              🎯 Calibrate to Body
             </button>
 
-            {calibrated && screen === 'calibrate' && (
-              <button
-                className="btn btn-success btn-full"
-                onClick={startGame}
-              >
-                🚀 Start Game!
-              </button>
-            )}
+            <button
+              className="btn btn-outline btn-full"
+              onClick={resetCalibration}
+            >
+              ↩ Reset to Centre
+            </button>
 
-            {(screen === 'game' || screen === 'win') && (
-              <button
-                className="btn btn-outline btn-full"
-                onClick={startGame}
-              >
-                🔁 New Maze
-              </button>
-            )}
+            <button
+              className="btn btn-outline btn-full"
+              onClick={startGame}
+            >
+              🔁 New Maze
+            </button>
           </div>
-
-          {screen === 'calibrate' && (
-            <div className="calibrate-instructions">
-              <h4>Calibration</h4>
-              <ol>
-                <li>Stand naturally in front of the camera</li>
-                <li>Make sure your upper body is fully visible</li>
-                <li>Click <strong>Calibrate</strong> to set your neutral position</li>
-                <li>Click <strong>Start Game!</strong> to begin</li>
-              </ol>
-            </div>
-          )}
         </div>
 
         {/* Right panel: maze */}
@@ -337,20 +332,7 @@ export default function App() {
             )}
           </h3>
 
-          {showCalibrateOverlay && (
-            <div className="maze-placeholder">
-              <div className="placeholder-text">
-                <p>🎯 Calibrate your pose to start!</p>
-                <p className="hint">
-                  {poseResult.visible
-                    ? 'Body detected — click Calibrate'
-                    : 'Stand in front of the camera'}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {(screen === 'game' || screen === 'win') && maze && (
+          {maze && (
             <div style={{ position: 'relative' }}>
               <MazeGame
                 maze={maze}

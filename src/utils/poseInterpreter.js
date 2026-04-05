@@ -80,13 +80,14 @@ export function interpretPose(landmarks, calibration, flipX = true) {
 
   const bodyCenter = { x: smoothX, y: smoothY };
 
-  if (!calibration) {
-    return { direction: null, bodyCenter, visible: true, dx: 0, dy: 0 };
-  }
+  // Use provided calibration or fall back to the frame centre (0.5, 0.5),
+  // which effectively divides the camera space into directional zones without
+  // requiring the user to calibrate manually.
+  const neutral = calibration ?? { x: 0.5, y: 0.5 };
 
-  // Deviation from calibrated neutral position
-  const dx = smoothX - calibration.x;
-  const dy = smoothY - calibration.y;
+  // Deviation from neutral position
+  const dx = smoothX - neutral.x;
+  const dy = smoothY - neutral.y;
 
   // Determine direction: pick the axis with the larger deviation,
   // only if it exceeds the threshold for that axis.
