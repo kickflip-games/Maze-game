@@ -10,6 +10,7 @@
 
 // Radius threshold (normalized) around the neutral point.
 export const DIRECTION_RADIUS = 0.085;
+const VELOCITY_THRESHOLD = 1.0; // normalized units per second
 
 // Smoothing: rolling average over this many frames
 const HISTORY_SIZE = 6;
@@ -33,7 +34,9 @@ export function resetPoseHistory() {
  *   visible: boolean,
  *   dx: number,
  *   dy: number,
- *   distance: number
+ *   distance: number,
+ *   velocityMagnitude: number,
+ *   directionBasis: 'distance'|'velocity'|'none'
  * }}
  */
 export function interpretPose(
@@ -43,7 +46,16 @@ export function interpretPose(
   directionRadius = DIRECTION_RADIUS
 ) {
   if (!landmarks || landmarks.length === 0) {
-    return { direction: null, nose: null, visible: false, dx: 0, dy: 0, distance: 0 };
+    return {
+      direction: null,
+      nose: null,
+      visible: false,
+      dx: 0,
+      dy: 0,
+      distance: 0,
+      velocityMagnitude: 0,
+      directionBasis: 'none',
+    };
   }
 
   const nose = landmarks[0];
@@ -55,7 +67,8 @@ export function interpretPose(
   let rawY = nose.y;
   if (flipX) rawX = 1 - rawX;
 
-  noseHistory.push({ x: rawX, y: rawY });
+  const now = performance.now();
+  noseHistory.push({ x: rawX, y: rawY, t: now });
   if (noseHistory.length > HISTORY_SIZE) noseHistory.shift();
 
   const smoothX =
@@ -68,14 +81,37 @@ export function interpretPose(
   const dx = smoothX - neutral.x;
   const dy = smoothY - neutral.y;
   const distance = Math.sqrt(dx * dx + dy * dy);
+  const latest = noseHistory[noseHistory.length - 1];
+  const prev = noseHistory.length >= 2 ? noseHistory[noseHistory.length - 2] : null;
+
+  let velocityX = 0;
+  let velocityY = 0;
+  let speed = 0;
+  if (prev && latest.t !== prev.t) {
+    const dt = (latest.t - prev.t) / 1000;
+    if (dt > 0) {
+      velocityX = (latest.x - prev.x) / dt;
+      velocityY = (latest.y - prev.y) / dt;
+      speed = Math.sqrt(velocityX * velocityX + velocityY * velocityY);
+    }
+  }
+
+  const axisFromVector = (vx, vy) =>
+    Math.abs(vx) >= Math.abs(vy) ? (vx > 0 ? 'right' : 'left') : vy > 0 ? 'down' : 'up';
+
+  const directionByDistance =
+    distance > directionRadius ? axisFromVector(dx, dy) : null;
+  const directionByVelocity =
+    speed > VELOCITY_THRESHOLD ? axisFromVector(velocityX, velocityY) : null;
 
   let direction = null;
-  if (distance > directionRadius) {
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      direction = dx > 0 ? 'right' : 'left';
-    } else {
-      direction = dy > 0 ? 'down' : 'up';
-    }
+  let directionBasis = 'none';
+  if (directionByDistance) {
+    direction = directionByDistance;
+    directionBasis = 'distance';
+  } else if (directionByVelocity) {
+    direction = directionByVelocity;
+    directionBasis = 'velocity';
   }
 
   return {
@@ -85,6 +121,8 @@ export function interpretPose(
     dx,
     dy,
     distance,
+    velocityMagnitude: speed,
+    directionBasis,
   };
 }
 

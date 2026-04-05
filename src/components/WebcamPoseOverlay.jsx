@@ -44,8 +44,15 @@ export default function WebcamPoseOverlay({
     // ── Directional guide overlay ─────────────────────────────────────────
     const cx = calibration.x * width;
     const cy = calibration.y * height;
-    const { direction: activeDir, nose, distance = 0 } = poseResult;
+    const {
+      direction: activeDir,
+      nose,
+      distance = 0,
+      directionBasis = 'none',
+    } = poseResult;
     const thresholdRadius = directionRadius * Math.min(width, height);
+    const movingPredictively = directionBasis === 'velocity';
+    const movementActive = Boolean(activeDir);
     const noseOutside = distance > directionRadius;
     const distanceRadius = Math.min(distance, 0.55) * Math.min(width, height);
 
@@ -115,7 +122,7 @@ export default function WebcamPoseOverlay({
 
     // Movement threshold circle
     ctx.save();
-    ctx.strokeStyle = noseOutside
+    ctx.strokeStyle = movementActive
       ? 'rgba(0,255,136,0.55)'
       : 'rgba(255,255,255,0.35)';
     ctx.setLineDash([6, 6]);
@@ -127,7 +134,11 @@ export default function WebcamPoseOverlay({
 
     if (distanceRadius > 0) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.strokeStyle = movementActive
+        ? 'rgba(0,255,136,0.25)'
+        : movingPredictively
+          ? 'rgba(0,255,136,0.18)'
+          : 'rgba(255,255,255,0.15)';
       ctx.setLineDash([2, 4]);
       ctx.beginPath();
       ctx.arc(cx, cy, distanceRadius, 0, Math.PI * 2);
@@ -145,7 +156,7 @@ export default function WebcamPoseOverlay({
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(nx, ny);
-      ctx.strokeStyle = noseOutside
+      ctx.strokeStyle = movementActive
         ? 'rgba(0,255,136,0.55)'
         : 'rgba(255,255,255,0.3)';
       ctx.lineWidth = 1.5;
@@ -155,8 +166,8 @@ export default function WebcamPoseOverlay({
       ctx.save();
       ctx.beginPath();
       ctx.arc(nx, ny, 6, 0, Math.PI * 2);
-      ctx.fillStyle = noseOutside ? '#00ff88' : '#ffffff';
-      ctx.shadowColor = noseOutside
+      ctx.fillStyle = movementActive ? '#00ff88' : '#ffffff';
+      ctx.shadowColor = movementActive
         ? '#00ff88'
         : 'rgba(255,255,255,0.8)';
       ctx.shadowBlur = 12;

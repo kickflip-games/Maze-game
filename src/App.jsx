@@ -19,6 +19,8 @@ const calibration = useMemo(() => ({ x: 0.5, y: 0.5 }), []);
     dx: 0,
     dy: 0,
     distance: 0,
+    velocityMagnitude: 0,
+    directionBasis: 'none',
   });
   const [directionRadius, setDirectionRadius] = useState(0.085);
   const [maze, setMaze] = useState(null);
@@ -124,7 +126,7 @@ const calibration = useMemo(() => ({ x: 0.5, y: 0.5 }), []);
   return (
     <div className="screen game-screen">
       <header className="game-header">
-        <h1 className="game-title-small">🌀 Maze Runner</h1>
+        <h1 className="game-title-small">Maze Runner</h1>
         <div className="timer">⏱ {formatTime(elapsedTime)}</div>
       </header>
 
